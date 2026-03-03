@@ -45,7 +45,7 @@ HARDENING_LEVELS = ["basic", "standard", "enhanced", "military", "battle_ready"]
 # Critical modules that must be present
 CRITICAL_MODULES = [
     "sentinel_bridge", "swarm_debate", "crypto_ledger", "knowledge_decay",
-    "model_tracker", "prompt_firewall", "retrievalGuard",
+    "model_tracker", "prompt_firewall", "retrieval_guard",
     "fuzzy_tuner", "constrained_rl", "digital_twin", "federated_mesh",
     "plc_parser", "scada_observer", "physics_twin", "rule_engine",
     "knowledge_graph", "actor_critic",

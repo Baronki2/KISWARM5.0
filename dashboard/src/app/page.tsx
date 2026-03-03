@@ -234,6 +234,13 @@ const mockModules: Module[] = [
   { id: 'software-ark', name: 'Software Ark', description: 'Backup and recovery', version: '4.9.0', category: 'v4.9+ Resilience', status: 'active', icon: Anchor },
   { id: 'ark-manager', name: 'Ark Manager', description: 'Ark coordination', version: '4.9.0', category: 'v4.9+ Resilience', status: 'active', icon: Package },
   { id: 'bootstrap-engine', name: 'Bootstrap Engine', description: 'System initialization', version: '4.9.0', category: 'v4.9+ Resilience', status: 'active', icon: Play },
+  
+  // v5.1 Solar Chase (Planetary Machine)
+  { id: 'solar-chase-coordinator', name: 'SolarChaseCoordinator', description: 'Module 34: Sun-following compute orchestrator', version: '5.1.0', category: 'v5.1 Solar Chase', status: 'active', icon: Sun },
+  { id: 'energy-pivot-engine', name: 'EnergyOvercapacityPivotEngine', description: 'Module 35: Zero Feed-In enforcement', version: '5.1.0', category: 'v5.1 Solar Chase', status: 'active', icon: Zap },
+  { id: 'planetary-sun-follower', name: 'PlanetarySunFollowerMesh', description: 'Module 36: Global compute handoff mesh', version: '5.1.0', category: 'v5.1 Solar Chase', status: 'active', icon: Globe },
+  { id: 'zero-emission-tracker', name: 'ZeroEmissionComputeTracker', description: 'Module 37: Immutable ESG ledger', version: '5.1.0', category: 'v5.1 Solar Chase', status: 'active', icon: TreeDeciduous },
+  { id: 'sun-handoff-validator', name: 'SunHandoffValidator', description: 'Module 38: Migration safety guard', version: '5.1.0', category: 'v5.1 Solar Chase', status: 'active', icon: Shield },
 ]
 
 const mockInstallSteps: InstallStep[] = [
@@ -752,7 +759,7 @@ export default function KISWARMDashboard() {
               </div>
               <div>
                 <h1 className="text-lg font-bold tracking-tight">KISWARM</h1>
-                <p className="text-xs text-gray-500">v4.9 Enterprise Dashboard</p>
+                <p className="text-xs text-gray-500">v5.1 PLANETARY MACHINE</p>
               </div>
             </div>
           </div>
