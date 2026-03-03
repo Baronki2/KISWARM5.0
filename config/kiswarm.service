@@ -1,0 +1,23 @@
+[Unit]
+Description=KISWARM v1.1 - Autonomous AI Swarm Governance System
+Documentation=https://github.com/Baronki2/KISWARM
+After=network.target
+
+[Service]
+Type=forking
+# IMPORTANT: Replace REPLACE_WITH_USERNAME and REPLACE_WITH_HOME before installing
+User=REPLACE_WITH_USERNAME
+ExecStart=REPLACE_WITH_HOME/KISWARM/start_all_services.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:REPLACE_WITH_HOME/logs/kiswarm_service.log
+StandardError=append:REPLACE_WITH_HOME/logs/kiswarm_service.log
+
+# Install:
+# sed -i "s|REPLACE_WITH_USERNAME|$(whoami)|g; s|REPLACE_WITH_HOME|$HOME|g" kiswarm.service
+# sudo cp kiswarm.service /etc/systemd/system/
+# sudo systemctl daemon-reload
+# sudo systemctl enable --now kiswarm
+
+[Install]
+WantedBy=multi-user.target

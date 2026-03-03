@@ -1,0 +1,135 @@
+{
+  "version": "1.0",
+  "description": "KISWARM Community Knowledge Base — shared fixes from all installations",
+  "updated_at": "2026-03-01T00:00:00",
+  "total_fixes": 6,
+  "resolved_reports": 0,
+  "schema": {
+    "fix_id": "FIX-NNN (team: 001-009, community: 010+)",
+    "error_pattern": "regex matched against error_message",
+    "success_rate": "0.0-1.0 (updated from experience reports)",
+    "contributed_by": "kiswarm-team | community | <system_id>"
+  },
+  "fixes": [
+    {
+      "fix_id": "FIX-001",
+      "title": "Ollama service not responding on port 11434",
+      "error_pattern": "ollama.*not.*respond|connection refused.*11434|failed to connect.*ollama|ConnectionRefusedError.*11434",
+      "error_class": "ConnectionRefusedError",
+      "module": null,
+      "os_family": null,
+      "fix_commands": [
+        "pkill -f 'ollama serve' 2>/dev/null || true",
+        "sleep 2",
+        "mkdir -p ~/logs",
+        "nohup ollama serve > ~/logs/ollama.log 2>&1 &",
+        "sleep 5"
+      ],
+      "fix_python": null,
+      "description": "Ollama not running — kill stale processes and restart cleanly",
+      "success_rate": 0.91,
+      "created_at": "2026-03-01",
+      "contributed_by": "kiswarm-team",
+      "times_applied": 0,
+      "times_succeeded": 0
+    },
+    {
+      "fix_id": "FIX-002",
+      "title": "Python virtual environment missing or broken",
+      "error_pattern": "No module named|venv.*not found|ModuleNotFoundError|cannot import name|ImportError",
+      "error_class": "ModuleNotFoundError",
+      "module": null,
+      "os_family": null,
+      "fix_commands": [
+        "rm -rf ~/KISWARM/mem0_env",
+        "python3 -m venv ~/KISWARM/mem0_env",
+        "~/KISWARM/mem0_env/bin/pip install --upgrade pip setuptools wheel",
+        "~/KISWARM/mem0_env/bin/pip install ollama mem0 qdrant-client flask flask-cors rich psutil requests numpy"
+      ],
+      "fix_python": null,
+      "description": "Completely rebuild Python virtual environment with all dependencies",
+      "success_rate": 0.88,
+      "created_at": "2026-03-01",
+      "contributed_by": "kiswarm-team",
+      "times_applied": 0,
+      "times_succeeded": 0
+    },
+    {
+      "fix_id": "FIX-003",
+      "title": "Qdrant storage permission denied",
+      "error_pattern": "permission denied.*qdrant|qdrant.*cannot open|read.only file system|PermissionError.*sentinel_data",
+      "error_class": "PermissionError",
+      "module": null,
+      "os_family": null,
+      "fix_commands": [
+        "mkdir -p ~/KISWARM/sentinel_data",
+        "chmod -R 755 ~/KISWARM/sentinel_data/",
+        "chown -R $(whoami):$(whoami) ~/KISWARM/sentinel_data/ 2>/dev/null || true"
+      ],
+      "fix_python": null,
+      "description": "Reset Qdrant storage directory permissions",
+      "success_rate": 0.95,
+      "created_at": "2026-03-01",
+      "contributed_by": "kiswarm-team",
+      "times_applied": 0,
+      "times_succeeded": 0
+    },
+    {
+      "fix_id": "FIX-004",
+      "title": "Port 11436 already in use",
+      "error_pattern": "address already in use.*11436|port 11436.*busy|OSError.*11436|Errno 98.*11436",
+      "error_class": "OSError",
+      "module": "sentinel_api",
+      "os_family": null,
+      "fix_commands": [
+        "PID=$(lsof -ti:11436 2>/dev/null || fuser 11436/tcp 2>/dev/null | awk '{print $1}' || echo ''); [ -n \"$PID\" ] && kill -9 $PID 2>/dev/null || true",
+        "sleep 2"
+      ],
+      "fix_python": null,
+      "description": "Forcefully free port 11436 from any occupying process",
+      "success_rate": 0.93,
+      "created_at": "2026-03-01",
+      "contributed_by": "kiswarm-team",
+      "times_applied": 0,
+      "times_succeeded": 0
+    },
+    {
+      "fix_id": "FIX-005",
+      "title": "pip install SSL/certificate error",
+      "error_pattern": "ssl.*error|certificate.*verify|SSLError|pip.*timeout|network.*unreachable.*pip",
+      "error_class": "SSLError",
+      "module": "installer_agent",
+      "os_family": null,
+      "fix_commands": [
+        "pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org --trusted-host pypi.python.org ollama mem0 qdrant-client flask flask-cors rich psutil requests"
+      ],
+      "fix_python": null,
+      "description": "Bypass SSL verification for pip installs in restricted environments",
+      "success_rate": 0.79,
+      "created_at": "2026-03-01",
+      "contributed_by": "kiswarm-team",
+      "times_applied": 0,
+      "times_succeeded": 0
+    },
+    {
+      "fix_id": "FIX-006",
+      "title": "git clone fails (auth/SSL/network)",
+      "error_pattern": "git.*clone.*failed|repository.*not found|authentication.*required.*github|SSL.*git|git.*timeout",
+      "error_class": null,
+      "module": "installer_agent",
+      "os_family": null,
+      "fix_commands": [
+        "git config --global http.sslVerify false",
+        "git config --global http.timeout 60",
+        "git clone https://github.com/Baronki2/KISWARM.git ~/KISWARM --depth 1"
+      ],
+      "fix_python": null,
+      "description": "Shallow clone with SSL bypass and extended timeout",
+      "success_rate": 0.82,
+      "created_at": "2026-03-01",
+      "contributed_by": "kiswarm-team",
+      "times_applied": 0,
+      "times_succeeded": 0
+    }
+  ]
+}

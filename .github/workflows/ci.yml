@@ -1,0 +1,224 @@
+name: KISWARM CI — Test & Quality
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:   # ← Allows manual trigger from GitHub UI
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ── Job 1: Unit & Integration Tests ───────────────────────────────────────
+  test:
+    name: 🧪 Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: 🧪 Run test suite with coverage
+        run: |
+          pytest tests/ \
+            --cov=python \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=50 \
+            -v \
+            --tb=short \
+            -p no:warnings
+        env:
+          KISWARM_HOME: ${{ runner.temp }}/kiswarm_test
+
+      - name: 📊 Upload coverage report
+        uses: codecov/codecov-action@v4
+        if: matrix.python-version == '3.11' && always()
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: kiswarm-coverage
+          fail_ci_if_error: false
+        continue-on-error: true
+
+  # ── Job 2: Code Quality ────────────────────────────────────────────────────
+  quality:
+    name: 🔍 Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 📦 Install quality tools
+        run: pip install flake8 black isort bandit
+
+      - name: 🎨 Check formatting (black)
+        run: black --check --diff python/ tests/ 2>&1 || echo "⚠ Formatting suggestions found"
+        continue-on-error: true
+
+      - name: 📐 Check imports (isort)
+        run: isort --check-only --diff python/ tests/ 2>&1 || echo "⚠ Import order suggestions"
+        continue-on-error: true
+
+      - name: 🔎 Lint (flake8)
+        run: |
+          flake8 python/ tests/ \
+            --max-line-length=100 \
+            --extend-ignore=E203,W503,E501 \
+            --statistics 2>&1 || echo "⚠ Lint suggestions found"
+        continue-on-error: true
+
+      - name: 🔒 Security scan (bandit)
+        run: bandit -r python/ -ll -q 2>&1 || echo "⚠ Security review suggestions"
+        continue-on-error: true
+
+  # ── Job 3: Shell Script Validation ────────────────────────────────────────
+  shellcheck:
+    name: 🐚 Shell Script Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: 🐚 Check deploy script
+        run: |
+          shellcheck deploy/kiswarm_deploy.sh \
+            --severity=warning \
+            --exclude=SC1091,SC2129 2>&1 || echo "⚠ ShellCheck suggestions"
+        continue-on-error: true
+
+      - name: 🐚 Check all scripts
+        run: |
+          find scripts/ -name "*.sh" | while read script; do
+            echo "Checking: $script"
+            shellcheck "$script" --severity=warning --exclude=SC1091,SC2129 \
+              2>&1 || echo "  ⚠ Issues in $script"
+          done
+        continue-on-error: true
+
+  # ── Job 4: Bash Syntax Check ───────────────────────────────────────────────
+  bash-syntax:
+    name: ✅ Bash Syntax Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: ✅ Validate bash syntax (all scripts)
+        run: |
+          echo "Validating bash syntax..."
+          ALL_PASS=true
+          for script in deploy/kiswarm_deploy.sh scripts/*.sh; do
+            if bash -n "$script" 2>&1; then
+              echo "  ✓ $script"
+            else
+              echo "  ✗ SYNTAX ERROR: $script"
+              ALL_PASS=false
+            fi
+          done
+          $ALL_PASS && echo "All scripts have valid syntax!" || exit 1
+
+  # ── Job 5: Python Import Smoke Test ───────────────────────────────────────
+  smoke-test:
+    name: 💨 Python Import Smoke Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 📦 Install production deps
+        run: pip install -r requirements.txt
+
+      - name: 💨 Test tool_proxy imports
+        run: |
+          cd python
+          python -c "
+          import sys, os
+          os.environ['KISWARM_HOME'] = '/tmp/kiswarm_smoke'
+          os.makedirs('/tmp/kiswarm_smoke/KISWARM/central_tools_pool', exist_ok=True)
+          os.makedirs('/tmp/kiswarm_smoke/logs', exist_ok=True)
+          from tool_proxy import app, load_config, safe_name, get_tools
+          print('✓ tool_proxy imports OK')
+          cfg = load_config()
+          print(f'✓ load_config returns dict: {list(cfg.keys())}')
+          assert safe_name('valid_tool') == True
+          assert safe_name('../evil') == False
+          print('✓ safe_name() working correctly')
+          "
+
+      - name: 💨 Test kiswarm_status imports
+        run: |
+          cd python
+          python -c "
+          import os
+          os.environ['KISWARM_HOME'] = '/tmp/kiswarm_smoke'
+          from kiswarm_status import KISWARMMonitor
+          m = KISWARMMonitor()
+          print('✓ KISWARMMonitor imports OK')
+          import datetime
+          assert isinstance(m.start_time, datetime.datetime)
+          print('✓ Monitor initializes correctly')
+          "
+
+  # ── Summary ────────────────────────────────────────────────────────────────
+  ci-summary:
+    name: 📋 CI Summary
+    runs-on: ubuntu-latest
+    needs: [test, quality, shellcheck, bash-syntax, smoke-test]
+    if: always()
+
+    steps:
+      - name: 📋 Print CI summary
+        run: |
+          echo "╔══════════════════════════════════════════════════════╗"
+          echo "║     KISWARM v1.1 — CI/CD Pipeline Summary           ║"
+          echo "╠══════════════════════════════════════════════════════╣"
+          echo "║  🧪 Tests:        ${{ needs.test.result }}"
+          echo "║  🔍 Quality:      ${{ needs.quality.result }}"
+          echo "║  🐚 ShellCheck:   ${{ needs.shellcheck.result }}"
+          echo "║  ✅ Bash Syntax:  ${{ needs.bash-syntax.result }}"
+          echo "║  💨 Smoke Tests:  ${{ needs.smoke-test.result }}"
+          echo "╠══════════════════════════════════════════════════════╣"
+          echo "║  🌐 https://github.com/Baronki2/KISWARM             ║"
+          echo "╚══════════════════════════════════════════════════════╝"

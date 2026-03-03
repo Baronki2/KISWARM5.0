@@ -1,0 +1,398 @@
+name: 🔄 Experience Feedback Loop
+
+on:
+  issues:
+    types: [opened, labeled]
+  schedule:
+    # Daily at 03:00 UTC — consolidate experience reports
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force_consolidate:
+        description: 'Force re-process all open experience reports'
+        required: false
+        default: 'false'
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 1: Process incoming experience reports
+  # Triggered when a new issue with label "experience-report" is opened
+  # ═══════════════════════════════════════════════════════════════════════════
+  process_experience_report:
+    name: 📊 Process Experience Report
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issues' &&
+      contains(github.event.issue.labels.*.name, 'experience-report')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests PyGithub
+
+      - name: Parse and classify issue
+        id: classify
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, re
+
+          body = os.environ.get("ISSUE_BODY", "")
+          
+          # Extract error patterns from issue body
+          patterns = re.findall(r'\*\*Message\*\*: `([^`]+)`', body)
+          modules  = re.findall(r'\*\*Module\*\*: `([^`]+)`', body)
+          classes  = re.findall(r'### Pattern \d+: `([^`]+)`', body)
+          version  = re.search(r'\*\*KISWARM Version\*\*: ([^\n]+)', body)
+          os_fam   = re.search(r'\*\*OS Family\*\*: ([^\n]+)', body)
+          
+          result = {
+            "patterns": patterns[:5],
+            "modules":  modules[:5],
+            "classes":  classes[:5],
+            "version":  version.group(1).strip() if version else "unknown",
+            "os_family": os_fam.group(1).strip() if os_fam else "unknown",
+            "has_patterns": len(patterns) > 0,
+          }
+          
+          print(f"patterns={json.dumps(patterns[:3])}")
+          print(f"modules={json.dumps(modules[:3])}")
+          print(f"has_data={'true' if result['has_patterns'] else 'false'}")
+          
+          with open("classified_issue.json", "w") as f:
+            json.dump(result, f, indent=2)
+          PYEOF
+
+      - name: Check if fix already exists
+        id: check_fix
+        run: |
+          python3 << 'PYEOF'
+          import json, re, os
+          
+          # Load current known fixes
+          fixes_file = "experience/known_fixes.json"
+          if os.path.exists(fixes_file):
+            with open(fixes_file) as f:
+              data = json.load(f)
+            fixes = data.get("fixes", [])
+          else:
+            fixes = []
+          
+          # Load classified issue
+          with open("classified_issue.json") as f:
+            issue = json.load(f)
+          
+          # Check if any pattern already has a fix
+          patterns = issue.get("patterns", [])
+          existing_fix = None
+          for pattern in patterns:
+            for fix in fixes:
+              try:
+                if re.search(fix["error_pattern"], pattern, re.IGNORECASE):
+                  existing_fix = fix["fix_id"]
+                  break
+              except Exception:
+                pass
+            if existing_fix:
+              break
+          
+          if existing_fix:
+            print(f"fix_exists=true")
+            print(f"existing_fix={existing_fix}")
+          else:
+            print(f"fix_exists=false")
+            print(f"existing_fix=none")
+          PYEOF
+
+      - name: Comment on issue with status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `## 🤖 KISWARM Experience Analysis
+            
+            Danke für den automatischen Erfahrungsbericht!
+            
+            **Status**: Analysiert ✓  
+            **Nächste Schritte**: Das KISWARM-Team prüft das Fehlermuster und erstellt ggf. einen neuen Fix.
+            
+            Wenn ein Fix gefunden wird, wird er in \`experience/known_fixes.json\` gemergt und allen KISWARM-Installationen via \`git pull\` zur Verfügung gestellt.
+            
+            *Diese Nachricht wurde automatisch vom Experience Feedback Loop generiert.*`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 2: Process fix proposals
+  # Triggered when an issue with label "fix-proposal" is opened
+  # ═══════════════════════════════════════════════════════════════════════════
+  process_fix_proposal:
+    name: 🔧 Process Fix Proposal
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issues' &&
+      contains(github.event.issue.labels.*.name, 'fix-proposal')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Parse fix proposal from issue
+        id: parse_fix
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, re
+          
+          body = os.environ.get("ISSUE_BODY", "")
+          issue_num = os.environ.get("ISSUE_NUMBER", "0")
+          
+          # Extract JSON block from issue body
+          match = re.search(r'```json\n(.*?)\n```', body, re.DOTALL)
+          if not match:
+            print("parse_ok=false")
+            exit(0)
+          
+          try:
+            proposal = json.loads(match.group(1))
+          except json.JSONDecodeError as e:
+            print(f"parse_ok=false")
+            print(f"error={e}")
+            exit(0)
+          
+          # Generate fix ID
+          fixes_file = "experience/known_fixes.json"
+          if os.path.exists(fixes_file):
+            with open(fixes_file) as f:
+              data = json.load(f)
+            existing = data.get("fixes", [])
+            next_num = max([int(f["fix_id"].split("-")[1]) for f in existing 
+                           if f["fix_id"].startswith("FIX-")], default=0) + 1
+          else:
+            existing = []
+            next_num = 10  # Community fixes start at FIX-010
+          
+          fix_id = f"FIX-{next_num:03d}"
+          
+          new_fix = {
+            "fix_id":         fix_id,
+            "title":          proposal.get("description", "Community Fix")[:80],
+            "error_pattern":  proposal.get("error_pattern", ""),
+            "error_class":    proposal.get("error_class"),
+            "module":         proposal.get("module"),
+            "os_family":      proposal.get("os_family"),
+            "fix_commands":   proposal.get("fix_commands", []),
+            "fix_python":     proposal.get("fix_python"),
+            "description":    proposal.get("description", ""),
+            "success_rate":   0.5,  # Unknown until reported
+            "created_at":     proposal.get("proposed_at", ""),
+            "contributed_by": "community",
+            "times_applied":  0,
+            "times_succeeded": 0,
+            "source_issue":   f"#{issue_num}",
+          }
+          
+          # Add to fixes list
+          existing.append(new_fix)
+          
+          updated = {
+            "version":     "1.0",
+            "updated_at":  __import__('datetime').datetime.utcnow().isoformat(),
+            "total_fixes": len(existing),
+            "fixes":       existing,
+          }
+          
+          os.makedirs("experience", exist_ok=True)
+          with open(fixes_file, "w") as f:
+            json.dump(updated, f, indent=2)
+          
+          print(f"parse_ok=true")
+          print(f"fix_id={fix_id}")
+          with open("new_fix_id.txt", "w") as f:
+            f.write(fix_id)
+          PYEOF
+
+      - name: Create Pull Request with new fix
+        if: steps.parse_fix.outputs.parse_ok == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const fixId = fs.readFileSync('new_fix_id.txt', 'utf8').trim();
+            const issueNum = context.issue.number;
+            
+            // Create a branch
+            const branchName = `fix/community-${fixId.toLowerCase()}-issue-${issueNum}`;
+            
+            // Get current SHA
+            const { data: ref } = await github.rest.git.getRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: 'heads/main'
+            });
+            
+            // Create branch
+            try {
+              await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/heads/${branchName}`,
+                sha: ref.object.sha
+              });
+            } catch(e) {
+              console.log('Branch may already exist:', e.message);
+            }
+            
+            // Read updated fixes file
+            const content = fs.readFileSync('experience/known_fixes.json', 'utf8');
+            const encoded = Buffer.from(content).toString('base64');
+            
+            // Get current file SHA
+            let fileSha;
+            try {
+              const { data: file } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: 'experience/known_fixes.json',
+                ref: branchName
+              });
+              fileSha = file.sha;
+            } catch(e) {
+              fileSha = undefined;
+            }
+            
+            // Update file on branch
+            await github.rest.repos.createOrUpdateFileContents({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path: 'experience/known_fixes.json',
+              message: `🔧 Add ${fixId} from community proposal (issue #${issueNum})`,
+              content: encoded,
+              branch: branchName,
+              sha: fileSha
+            });
+            
+            // Create PR
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔧 ${fixId}: Community Fix from Issue #${issueNum}`,
+              body: `## New Community Fix: ${fixId}\n\nAuto-generated from fix proposal in issue #${issueNum}.\n\nAfter merge, this fix will be available to all KISWARM installations via \`git pull\`.\n\nCloses #${issueNum}`,
+              head: branchName,
+              base: 'main'
+            });
+            
+            console.log(`Created PR: ${pr.html_url}`);
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 3: Daily consolidation — update success rates, clean old reports
+  # ═══════════════════════════════════════════════════════════════════════════
+  daily_consolidation:
+    name: 📈 Daily Experience Consolidation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install GitHub CLI dependency
+        run: pip install PyGithub
+
+      - name: Consolidate experience data
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json
+          from github import Github
+          
+          g = Github(os.environ["GITHUB_TOKEN"])
+          repo = g.get_repo("Baronki2/KISWARM")
+          
+          # Load current fixes
+          fixes_file = "experience/known_fixes.json"
+          if os.path.exists(fixes_file):
+            with open(fixes_file) as f:
+              data = json.load(f)
+          else:
+            data = {"version": "1.0", "fixes": []}
+          
+          fixes = data.get("fixes", [])
+          
+          # Count closed experience-report issues as "resolved"
+          resolved = list(repo.get_issues(state="closed", labels=["experience-report"]))
+          print(f"Resolved experience reports: {len(resolved)}")
+          
+          # Update metadata
+          data["updated_at"]   = __import__('datetime').datetime.utcnow().isoformat()
+          data["total_fixes"]  = len(fixes)
+          data["resolved_reports"] = len(resolved)
+          
+          os.makedirs("experience", exist_ok=True)
+          with open(fixes_file, "w") as f:
+            json.dump(data, f, indent=2)
+          
+          print(f"Consolidated: {len(fixes)} fixes, {len(resolved)} resolved reports")
+          PYEOF
+
+      - name: Commit consolidated data
+        run: |
+          git config user.name  "KISWARM Feedback Bot"
+          git config user.email "kiswarm-bot@kiswarm.ai"
+          git add experience/known_fixes.json
+          git diff --staged --quiet || git commit -m "📈 Daily experience consolidation [bot]"
+          git push origin main || echo "Nothing to push"
+
+      - name: Create summary issue if many unresolved
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'experience-report',
+              state: 'open'
+            });
+            
+            if (issues.length >= 5) {
+              console.log(`${issues.length} unresolved experience reports — creating summary`);
+              // Could create a summary issue here for the team
+            } else {
+              console.log(`${issues.length} open experience reports — below threshold`);
+            }

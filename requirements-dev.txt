@@ -1,0 +1,1 @@
+pytest==6.2.5\npytest-cov==2.12.1\nblack==21.9b0\nflake8==3.9.2\nbandit==1.7.0\nmypy==0.910\n# Add other dev tools with specific versions below\n
